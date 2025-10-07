@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.distributions as dist
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def gradients(outputs, inputs, order=1):
@@ -113,7 +114,7 @@ class BPINN:
 # HMC采样器
 # -------------------------------
 class HMC:
-    def __init__(self, target_log_prob_fn, init_state, step_size=0.01, num_leapfrog_steps=30, num_results=800, num_burnin=800):
+    def __init__(self, target_log_prob_fn, init_state, step_size=0.001, num_leapfrog_steps=10, num_results=100, num_burnin=100):
         self.target_log_prob_fn = target_log_prob_fn
         self.current_state = init_state.clone().detach().requires_grad_(True)
         self.step_size = step_size
@@ -129,7 +130,7 @@ class HMC:
 
         # 半步更新动量
         potential = -self.target_log_prob_fn(position)
-        grad_potential = torch.autograd.grad(potential.real, position)[0]
+        grad_potential = torch.autograd.grad(potential, position, grad_outputs=torch.ones_like(potential))[0]
         momentum = momentum - 0.5 * step_size * grad_potential
 
         # 循环迭代
@@ -140,12 +141,12 @@ class HMC:
 
             if i != self.num_leapfrog_steps - 1:
                 potential = -self.target_log_prob_fn(position)
-                grad_potential = torch.autograd.grad(potential.real, position)[0]
+                grad_potential = torch.autograd.grad(potential, position, grad_outputs=torch.ones_like(potential))[0]
                 momentum = momentum - step_size * grad_potential
 
         # 最后半步更新动量
         potential = -self.target_log_prob_fn(position)
-        grad_potential = torch.autograd.grad(potential.real, position)[0]
+        grad_potential = torch.autograd.grad(potential, position, grad_outputs= torch.ones_like(potential))[0]
         momentum = momentum - 0.5 * step_size * grad_potential
 
         # 反转动量 (保证对称性)
@@ -155,6 +156,7 @@ class HMC:
 
     def run_chain(self):
         samples = []
+        losses = []
         accept_count = 0
 
         current_position = self.current_state.clone().detach().requires_grad_(True)
@@ -189,6 +191,22 @@ class HMC:
                 samples.append(current_position.detach().numpy())
             print(f"迭代轮数:{i},目前w实部:{current_position[-4]},目前w虚部:{current_position[-3]}")
 
+            Leaver_real = 0.85023
+            Leaver_img = -0.14365
+            w_real = current_position[-4].detach().numpy()
+            w_img = current_position[-3].detach().numpy()
+            error_real = 100*(w_real - Leaver_real)/Leaver_real
+            error_img = 100*(w_img - Leaver_img)/Leaver_img
+            average_error = (np.abs(error_real) + np.abs(error_img))/2
+            losses.append(average_error)
+
+        plt.figure()
+        plt.plot(losses)
+        plt.xlabel("Iteration")
+        plt.ylabel("Loss (-log posterior)")
+        plt.title("HMC Loss evolution")
+        plt.show()
+
         acceptance_rate = accept_count / self.num_results
         samples = np.array(samples)
         return samples, acceptance_rate
@@ -197,7 +215,7 @@ class HMC:
 # 主函数示例调用
 # -------------------------------
 if __name__ == "__main__":
-    bpinnt = BPINN(layers_f=[1,32,32,2], layers_g=[1,32,32,2])
+    bpinnt = BPINN(layers_f=[1,200,200,2], layers_g=[1,200,200,2])
 
     a = torch.tensor(0.4999)
     l = bpinnt.l
@@ -240,9 +258,12 @@ if __name__ == "__main__":
         d2gdt2 = gradients(dgdt,u)
         res_F = F2*d2fdt2 + F1*dfdt + F0*f
         res_G = G2*d2gdt2 + G1*dgdt + G0*g
-        print(torch.norm(res_F))
-        lik_F = dist.Normal(0., noise_pdef).log_prob(res_F).sum()
-        lik_G = dist.Normal(0., noise_pdeg).log_prob(res_G).sum()
+        lik_F_real = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum()
+        lik_F_imag = dist.Normal(0., noise_pdef).log_prob(res_F.imag).sum()
+        lik_G_real = dist.Normal(0., noise_pdeg).log_prob(res_G.real).sum()
+        lik_G_imag = dist.Normal(0., noise_pdeg).log_prob(res_G.imag).sum()
+        lik_F = lik_F_real + lik_F_imag
+        lik_G = lik_G_real + lik_G_imag
 
         log_prior = 0.
         for v in var_f_new:
@@ -259,17 +280,17 @@ if __name__ == "__main__":
     samples,acceptance_rate = hmc.run_chain()
     print("HMC采样完成, 样本形状:", samples.shape)
 
-    wshi = 0
-    wxu = 0
+    w_realsum = 0
+    w_imagsum = 0
     for i in samples:
-        wshi += i[-4]
-        wxu  += i[-3]
-    wshiaver = wshi/100
-    wxuaver  = wxu/100
+        w_realsum += i[-4]
+        w_imagsum += i[-3]
+    w_real = w_realsum/20
+    w_imag = w_imagsum/20
 
     def print_results_extra(w_real,w_img):
-        Leaver_real = np.array([0.85023])
-        Leaver_img = np.array([-0.14365])
+        Leaver_real = 0.85023
+        Leaver_img = -0.14365
 
         error_real = 100*(w_real - Leaver_real)/Leaver_real
     #print("Percentual error for the real frequency:\n",np.abs(error_real[:,None]))
@@ -280,6 +301,6 @@ if __name__ == "__main__":
 
     #Print the results for each entry all each in one line, printing the real and imaginary part of w, the error for the real and imaginary part of w and the average error:
         average_error = (np.abs(error_real) + np.abs(error_img))/2
-        print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img[i]:.5f}, Error real: {error_real[i]:.5f}%, Error imaginary: {error_img[i]:.5f}%, Average error: {average_error:.5f}%")
+        print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img:.5f}, Error real: {error_real:.5f}%, Error imaginary: {error_img:.5f}%, Average error: {average_error:.5f}%")
 
-    print_results_extra(wshiaver,wxuaver)
+    print_results_extra(w_real,w_imag)
