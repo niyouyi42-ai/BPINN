@@ -136,8 +136,8 @@ class NeuralNetwork(nn.Module):
         self.A_real = torch.nn.Parameter(data = torch.tensor(float(l*(l+1)-s*(s+1) ) ), requires_grad = True)
         self.A_img = torch.nn.Parameter(data = torch.tensor(0.0), requires_grad = True)
 
-        self.w_real = torch.nn.Parameter(data = torch.tensor(10.0), requires_grad = True)
-        self.w_img = torch.nn.Parameter(data = torch.tensor(10.0), requires_grad = True)
+        self.w_real = torch.nn.Parameter(data = torch.tensor(0.7), requires_grad = True)
+        self.w_img = torch.nn.Parameter(data = torch.tensor(-1.4), requires_grad = True)
 
 
         #Network for the Radial Equation (depends on x)
@@ -363,7 +363,7 @@ for a in a_k_list:
         return loss
     
     #Train the model with the fine tuning optimiser
-    for i in range(2000): 
+    for i in range(250): 
         optimiser_tuning.step(closure)
 
         #record values of loss function
@@ -372,8 +372,6 @@ for a in a_k_list:
         if(((i+1)%10 == 0) or (i == 0) ):
             
             print(f"LFBGS: a = {a}, loss at iteration {i+1} = {closure().item():.5f}")
-            print(f"For a = {a}, omega converged to w = {model.w_real.item():.5f} {model.w_img.item():.5f}i  and to A = {model.A_real.item():.5f} + {model.A_img.item():.5f}i")
-
             """
             # If the two last values of the loss are the same, within a tolerance of 1e-5, we stop the training:
             if i > 0 and abs(loss_list[-1] - loss_list[-10]) < 1e-5:
