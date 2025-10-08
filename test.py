@@ -54,26 +54,9 @@ class BNN(nn.Module):
                 y = torch.tanh(y)
         return y
 
-    def get_parameters_vector(self):
-        vec = []
-        for layer in self.layers:
-            vec.append(layer.weight.flatten())
-            vec.append(layer.bias.flatten())
-        return torch.cat(vec)
-
-    def set_parameters_vector(self, vec):
-        pointer = 0
-        for layer in self.layers:
-            n_w = layer.weight.numel()
-            n_b = layer.bias.numel()
-            layer.weight.data = vec[pointer:pointer+n_w].view_as(layer.weight).data
-            pointer += n_w
-            layer.bias.data = vec[pointer:pointer+n_b].view_as(layer.bias).data
-            pointer += n_b
-
-
-class BPINN:
+class BPINN(nn.Module):
     def __init__(self, layers_f, layers_g,l=2.0, m=0.0, s=-2.0):
+        super().__init__()
         self.f_net = BNN(layers_f)
         self.g_net = BNN(layers_g)
 
@@ -86,20 +69,22 @@ class BPINN:
         self.A_real = nn.Parameter(dist.Normal(l*(l+1)-s*(s+1),1).sample())
         self.A_imag = nn.Parameter(dist.Normal(0.0,1.0).sample())
 
-    def get_variables(self):
-        # 返回两个variables列表，每个只包含各自权重+偏置，w和A共享
-        var_f = self.f_net.get_parameters_vector()
-        var_g = self.g_net.get_parameters_vector()
-        shared = torch.stack([self.w_real, self.w_imag, self.A_real, self.A_imag])
-        return var_f, var_g, shared
-
-    def set_variables(self, var_f, var_g, shared):
-        self.f_net.set_parameters_vector(var_f)
-        self.g_net.set_parameters_vector(var_g)
-        self.w_real.data = shared[0]
-        self.w_imag.data = shared[1]
-        self.A_real.data = shared[2]
-        self.A_imag.data = shared[3]
+    def get_parameters_vector(self):
+        """获取所有参数的展平向量"""
+        params = []
+        for param in self.parameters():
+            params.append(param.flatten())
+        return torch.cat(params)
+    
+    
+    def set_parameters_vector(self, vec):
+        """从展平向量设置所有参数 - 关键方法！"""
+        pointer = 0
+        for param in self.parameters():
+            num_elements = param.numel()
+            # 重要：使用.data来修改值，保持计算图
+            param.data = vec[pointer:pointer+num_elements].view_as(param).data
+            pointer += num_elements
 
     def forward(self, x, u):
         f_out = self.f_net(x)
@@ -215,12 +200,12 @@ class HMC:
 # 主函数示例调用
 # -------------------------------
 if __name__ == "__main__":
-    bpinnt = BPINN(layers_f=[1,200,200,2], layers_g=[1,200,200,2])
+    bpinn = BPINN(layers_f=[1,200,200,2], layers_g=[1,200,200,2])
 
     a = torch.tensor(0.4999)
-    l = bpinnt.l
-    m = bpinnt.m
-    s = bpinnt.s
+    l = bpinn.l
+    m = bpinn.m
+    s = bpinn.s
 
     N_x, N_u = 100,100
     r_plus = (1 + torch.sqrt(1-4*a**2)) / 2
@@ -228,18 +213,11 @@ if __name__ == "__main__":
     u = torch.linspace(-1,1,N_u).view(-1,1).requires_grad_(True)
 
     # 初始变量向量展开
-    var_f, var_g, shared = bpinnt.get_variables()
-    init_vec = torch.cat([var_f, var_g, shared])
+    init_vec = bpinn.get_parameters_vector()
 
     # log posterior 函数
     def log_post(vec):
-        f_len = len(var_f)
-        g_len = len(var_g)
-        var_f_new = vec[:f_len]
-        var_g_new = vec[f_len:f_len+g_len]
-        shared_new = vec[-4:]
-        w_real, w_imag, A_real, A_imag = vec[-4:]
-        bpinnt.set_variables(var_f_new, var_g_new, shared_new)
+        bpinn.set_parameters_vector(vec)
 
         noise_pdef = 0.05
         noise_pdeg = 0.05
@@ -247,15 +225,18 @@ if __name__ == "__main__":
         noise_A = 0.05
         prior_sigma = 1.0
 
-        w = torch.view_as_complex(torch.stack((w_real,w_imag),dim=0))
-        A = torch.view_as_complex(torch.stack((A_real,A_imag),dim=0))
-        f,g,w,A = bpinnt.forward(x,u)
+        w = torch.view_as_complex(torch.stack((bpinn.w_real,bpinn.w_imag),dim=0))
+        A = torch.view_as_complex(torch.stack((bpinn.A_real,bpinn.A_imag),dim=0))
+        f,g,w,A = bpinn.forward(x,u)
+
         F0,F1,F2 = F_terms(a,w,A,s,m,x)
         G0,G1,G2 = G_terms(a,w,A,s,m,u)
+
         dfdt = gradients(f,x)
         d2fdt2 = gradients(dfdt,x)
         dgdt = gradients(g,u)
         d2gdt2 = gradients(dgdt,u)
+
         res_F = F2*d2fdt2 + F1*dfdt + F0*f
         res_G = G2*d2gdt2 + G1*dgdt + G0*g
         lik_F_real = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum()
@@ -266,14 +247,15 @@ if __name__ == "__main__":
         lik_G = lik_G_real + lik_G_imag
 
         log_prior = 0.
-        for v in var_f_new:
-            log_prior += dist.Normal(0,prior_sigma).log_prob(v).sum()
-        for v in var_g_new:
-            log_prior += dist.Normal(0,prior_sigma).log_prob(v).sum()
-        log_prior += dist.Normal(0, noise_w).log_prob(w_real)
-        log_prior += dist.Normal(0, noise_w).log_prob(w_imag)
-        log_prior += dist.Normal(0, noise_A).log_prob(A_real)
-        log_prior += dist.Normal(0, noise_A).log_prob(A_imag)
+
+        for param in bpinn.parameters():
+            if param is bpinn.w_real or param is bpinn.w_imag:
+                sigma = noise_w
+            elif param is bpinn.A_real or param is bpinn.A_imag:
+                sigma = noise_A
+            else:
+                sigma = prior_sigma
+            log_prior += dist.Normal(0, sigma).log_prob(param).sum()
         return lik_F + lik_G + log_prior
     
     hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
