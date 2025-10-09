@@ -75,10 +75,8 @@ class BPINN(nn.Module):
         for param in self.parameters():
             params.append(param.flatten())
         return torch.cat(params)
-    
-    
+
     def set_parameters_vector(self, vec):
-        """从展平向量设置所有参数 - 关键方法！"""
         pointer = 0
         for param in self.parameters():
             num_elements = param.numel()
@@ -95,9 +93,6 @@ class BPINN(nn.Module):
         A = torch.complex(self.A_real, self.A_imag)
         return f_complex, g_complex, w, A
 
-# -------------------------------
-# HMC采样器
-# -------------------------------
 class HMC:
     def __init__(self, target_log_prob_fn, init_state, step_size=0.001, num_leapfrog_steps=10, num_results=100, num_burnin=100):
         self.target_log_prob_fn = target_log_prob_fn
@@ -196,93 +191,93 @@ class HMC:
         samples = np.array(samples)
         return samples, acceptance_rate
 
-# -------------------------------
-# 主函数示例调用
-# -------------------------------
-if __name__ == "__main__":
-    bpinn = BPINN(layers_f=[1,200,200,2], layers_g=[1,200,200,2])
 
-    a = torch.tensor(0.4999)
-    l = bpinn.l
-    m = bpinn.m
-    s = bpinn.s
+bpinn = BPINN(layers_f=[1,20,20,2], layers_g=[1,20,20,2])
+para = bpinn.get_parameters_vector()
+print("初始参数向量形状:", para.shape)
 
-    N_x, N_u = 100,100
-    r_plus = (1 + torch.sqrt(1-4*a**2)) / 2
-    x = torch.linspace(0,1/r_plus,N_x).view(-1,1).requires_grad_(True)
-    u = torch.linspace(-1,1,N_u).view(-1,1).requires_grad_(True)
+a = torch.tensor(0.4999)
+l = bpinn.l
+m = bpinn.m
+s = bpinn.s
+
+N_x, N_u = 100,100
+r_plus = (1 + torch.sqrt(1-4*a**2)) / 2
+x = torch.linspace(0,1/r_plus,N_x).view(-1,1).requires_grad_(True)
+u = torch.linspace(-1,1,N_u).view(-1,1).requires_grad_(True)
 
     # 初始变量向量展开
-    init_vec = bpinn.get_parameters_vector()
+init_vec = bpinn.get_parameters_vector()
 
     # log posterior 函数
-    def log_post(vec):
-        bpinn.set_parameters_vector(vec)
+def log_post(vec):
+    bpinn.set_parameters_vector(vec)
 
-        noise_pdef = 0.05
-        noise_pdeg = 0.05
-        noise_w = 0.05
-        noise_A = 0.05
-        prior_sigma = 1.0
-
-        w = torch.view_as_complex(torch.stack((bpinn.w_real,bpinn.w_imag),dim=0))
-        A = torch.view_as_complex(torch.stack((bpinn.A_real,bpinn.A_imag),dim=0))
-        f,g,w,A = bpinn.forward(x,u)
-
-        F0,F1,F2 = F_terms(a,w,A,s,m,x)
-        G0,G1,G2 = G_terms(a,w,A,s,m,u)
-
-        dfdt = gradients(f,x)
-        d2fdt2 = gradients(dfdt,x)
-        dgdt = gradients(g,u)
-        d2gdt2 = gradients(dgdt,u)
-
-        res_F = F2*d2fdt2 + F1*dfdt + F0*f
-        res_G = G2*d2gdt2 + G1*dgdt + G0*g
-        lik_F_real = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum()
-        lik_F_imag = dist.Normal(0., noise_pdef).log_prob(res_F.imag).sum()
-        lik_G_real = dist.Normal(0., noise_pdeg).log_prob(res_G.real).sum()
-        lik_G_imag = dist.Normal(0., noise_pdeg).log_prob(res_G.imag).sum()
-        lik_F = lik_F_real + lik_F_imag
-        lik_G = lik_G_real + lik_G_imag
-
-        log_prior = 0.
-
-        for param in bpinn.parameters():
-            if param is bpinn.w_real or param is bpinn.w_imag:
-                sigma = noise_w
-            elif param is bpinn.A_real or param is bpinn.A_imag:
-                sigma = noise_A
-            else:
-                sigma = prior_sigma
-            log_prior += dist.Normal(0, sigma).log_prob(param).sum()
-        return lik_F + lik_G + log_prior
+    noise_pdef = 0.05
+    noise_pdeg = 0.05
+    noise_w = 0.05
+    noise_A = 0.05
+    prior_sigma = 1.0
     
-    hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
-    samples,acceptance_rate = hmc.run_chain()
-    print("HMC采样完成, 样本形状:", samples.shape)
+    w = torch.view_as_complex(torch.stack((bpinn.w_real,bpinn.w_imag),dim=0))
+    A = torch.view_as_complex(torch.stack((bpinn.A_real,bpinn.A_imag),dim=0))
+    f,g,w,A = bpinn.forward(x,u)
 
-    w_realsum = 0
-    w_imagsum = 0
-    for i in samples:
-        w_realsum += i[-4]
-        w_imagsum += i[-3]
-    w_real = w_realsum/20
-    w_imag = w_imagsum/20
+    F0,F1,F2 = F_terms(a,w,A,s,m,x)
+    G0,G1,G2 = G_terms(a,w,A,s,m,u)
 
-    def print_results_extra(w_real,w_img):
-        Leaver_real = 0.85023
-        Leaver_img = -0.14365
+    dfdt = gradients(f,x)
+    d2fdt2 = gradients(dfdt,x)
+    dgdt = gradients(g,u)
+    d2gdt2 = gradients(dgdt,u)
 
-        error_real = 100*(w_real - Leaver_real)/Leaver_real
-    #print("Percentual error for the real frequency:\n",np.abs(error_real[:,None]))
+    res_F = F2*d2fdt2 + F1*dfdt + F0*f
+    res_G = G2*d2gdt2 + G1*dgdt + G0*g
+    lik_F_real = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum()
+    lik_F_imag = dist.Normal(0., noise_pdef).log_prob(res_F.imag).sum()
+    lik_G_real = dist.Normal(0., noise_pdeg).log_prob(res_G.real).sum()
+    lik_G_imag = dist.Normal(0., noise_pdeg).log_prob(res_G.imag).sum()
+    lik_F = lik_F_real + lik_F_imag
+    lik_G = lik_G_real + lik_G_imag
 
-        error_img = 100*(w_img - Leaver_img)/Leaver_img
-    #print("Percentual error for the imaginary frequency:\n",np.abs(error_img[:,None]))
+    log_prior = 0.
+
+    for param in bpinn.parameters():
+        if param is bpinn.w_real or param is bpinn.w_imag:
+            sigma = noise_w
+        elif param is bpinn.A_real or param is bpinn.A_imag:
+            sigma = noise_A
+        else:
+            sigma = prior_sigma
+        log_prior += dist.Normal(0, sigma).log_prob(param).sum()
+    return lik_F + lik_G + log_prior
 
 
-    #Print the results for each entry all each in one line, printing the real and imaginary part of w, the error for the real and imaginary part of w and the average error:
-        average_error = (np.abs(error_real) + np.abs(error_img))/2
-        print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img:.5f}, Error real: {error_real:.5f}%, Error imaginary: {error_img:.5f}%, Average error: {average_error:.5f}%")
+hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
+samples,acceptance_rate = hmc.run_chain()
+print("HMC采样完成, 样本形状:", samples.shape)
 
-    print_results_extra(w_real,w_imag)
+w_realsum = 0
+w_imagsum = 0
+for i in samples:
+    w_realsum += i[-4]
+    w_imagsum += i[-3]
+w_real = w_realsum/20
+w_imag = w_imagsum/20
+    
+def print_results_extra(w_real,w_img):
+    Leaver_real = 0.85023
+    Leaver_img = -0.14365
+    
+    error_real = 100*(w_real - Leaver_real)/Leaver_real
+        #print("Percentual error for the real frequency:\n",np.abs(error_real[:,None]))
+    
+    error_img = 100*(w_img - Leaver_img)/Leaver_img
+        #print("Percentual error for the imaginary frequency:\n",np.abs(error_img[:,None]))
+    
+    
+        #Print the results for each entry all each in one line, printing the real and imaginary part of w, the error for the real and imaginary part of w and the average error:
+    average_error = (np.abs(error_real) + np.abs(error_img))/2
+    print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img:.5f}, Error real: {error_real:.5f}%, Error imaginary: {error_img:.5f}%, Average error: {average_error:.5f}%")
+    
+print_results_extra(w_real,w_imag)

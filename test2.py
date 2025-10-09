@@ -54,23 +54,6 @@ class BNN(nn.Module):
                 y = torch.tanh(y)
         return y
 
-    def get_parameters_vector(self):
-        vec = []
-        for layer in self.layers:
-            vec.append(layer.weight.flatten())
-            vec.append(layer.bias.flatten())
-        return torch.cat(vec)
-
-    def set_parameters_vector(self, vec):
-        pointer = 0
-        for layer in self.layers:
-            n_w = layer.weight.numel()
-            n_b = layer.bias.numel()
-            layer.weight.data = vec[pointer:pointer+n_w].view_as(layer.weight).data
-            pointer += n_w
-            layer.bias.data = vec[pointer:pointer+n_b].view_as(layer.bias).data
-            pointer += n_b
-
 
 class BPINN(nn.Module):
     def __init__(self, layers_f, layers_g,l=2.0, m=0.0, s=-2.0):
@@ -87,20 +70,20 @@ class BPINN(nn.Module):
         self.A_real = nn.Parameter(dist.Normal(l*(l+1)-s*(s+1),1).sample())
         self.A_imag = nn.Parameter(dist.Normal(0.0,1.0).sample())
 
-    def get_variables(self):
-        # 返回两个variables列表，每个只包含各自权重+偏置，w和A共享
-        var_f = self.f_net.get_parameters_vector()
-        var_g = self.g_net.get_parameters_vector()
-        shared = torch.stack([self.w_real, self.w_imag, self.A_real, self.A_imag])
-        return var_f, var_g, shared
+    def get_parameters_vector(self):
+        """获取所有参数的展平向量"""
+        params = []
+        for param in self.parameters():
+            params.append(param.flatten())
+        return torch.cat(params)
 
-    def set_variables(self, var_f, var_g, shared):
-        self.f_net.set_parameters_vector(var_f)
-        self.g_net.set_parameters_vector(var_g)
-        self.w_real.data = shared[0]
-        self.w_imag.data = shared[1]
-        self.A_real.data = shared[2]
-        self.A_imag.data = shared[3]
+    def set_parameters_vector(self, vec):
+        pointer = 0
+        for param in self.parameters():
+            num_elements = param.numel()
+            # 重要：使用.data来修改值，保持计算图
+            param.data = vec[pointer:pointer+num_elements].view_as(param).data
+            pointer += num_elements
 
     def forward(self, x, u):
         f_out = self.f_net(x)
@@ -229,18 +212,12 @@ if __name__ == "__main__":
     u = torch.linspace(-1,1,N_u).view(-1,1).requires_grad_(True)
 
     # 初始变量向量展开
-    var_f, var_g, shared = bpinnt.get_variables()
-    init_vec = torch.cat([var_f, var_g, shared])
+    init_vec = bpinnt.get_parameters_vector().detach().clone()
+
 
     # log posterior 函数
     def log_post(vec):
-        f_len = len(var_f)
-        g_len = len(var_g)
-        var_f_new = vec[:f_len]
-        var_g_new = vec[f_len:f_len+g_len]
-        shared_new = vec[-4:]
-        w_real, w_imag, A_real, A_imag = vec[-4:]
-        bpinnt.set_variables(var_f_new, var_g_new, shared_new)
+        bpinnt.set_parameters_vector(vec)
 
         noise_pdef = 0.05
         noise_pdeg = 0.05
@@ -248,8 +225,8 @@ if __name__ == "__main__":
         noise_A = 0.05
         prior_sigma = 1.0
 
-        w = torch.view_as_complex(torch.stack((w_real,w_imag),dim=0))
-        A = torch.view_as_complex(torch.stack((A_real,A_imag),dim=0))
+        w = torch.view_as_complex(torch.stack((bpinnt.w_real,bpinnt.w_imag),dim=0))
+        A = torch.view_as_complex(torch.stack((bpinnt.A_real,bpinnt.A_imag),dim=0))
         f,g,w,A = bpinnt.forward(x,u)
         F0,F1,F2 = F_terms(a,w,A,s,m,x)
         G0,G1,G2 = G_terms(a,w,A,s,m,u)
@@ -267,16 +244,9 @@ if __name__ == "__main__":
         lik_G = lik_G_real + lik_G_imag
 
         log_prior = 0.
-        for v in var_f_new:
-            log_prior += dist.Normal(0,prior_sigma).log_prob(v).sum()
-        for v in var_g_new:
-            log_prior += dist.Normal(0,prior_sigma).log_prob(v).sum()
-        log_prior += dist.Normal(0, noise_w).log_prob(w_real)
-        log_prior += dist.Normal(0, noise_w).log_prob(w_imag)
-        log_prior += dist.Normal(0, noise_A).log_prob(A_real)
-        log_prior += dist.Normal(0, noise_A).log_prob(A_imag)
         return lik_F + lik_G + log_prior
     
+
     hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
     samples,acceptance_rate = hmc.run_chain()
     print("HMC采样完成, 样本形状:", samples.shape)
