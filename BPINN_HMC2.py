@@ -72,9 +72,8 @@ class BNN(nn.Module):
             pointer += n_b
 
 
-class BPINN(nn.Module):
+class BPINN:
     def __init__(self, layers_f, layers_g,l=2.0, m=0.0, s=-2.0):
-        super().__init__()
         self.f_net = BNN(layers_f)
         self.g_net = BNN(layers_g)
 

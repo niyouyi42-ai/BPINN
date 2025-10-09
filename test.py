@@ -193,8 +193,6 @@ class HMC:
 
 
 bpinn = BPINN(layers_f=[1,20,20,2], layers_g=[1,20,20,2])
-para = bpinn.get_parameters_vector()
-print("初始参数向量形状:", para.shape)
 
 a = torch.tensor(0.4999)
 l = bpinn.l
