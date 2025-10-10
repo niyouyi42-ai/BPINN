@@ -1,10 +1,13 @@
 #!/usr/bin/python3
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.distributions as dist
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
+import torch.distributions as dist
+
+
 
 def gradients(outputs, inputs, order=1):
     re_outputs = torch.real(outputs)
@@ -35,7 +38,6 @@ def G_terms(a,w,A,s,m,u):
     G1 = -4*(u**2-1)*(2*(u+a*(-1+u**2)*w)+(-1+u)*torch.abs(m-s)+(1+u)*torch.abs(m+s))
     G2 = -4*(u**2-1)**2
     return G0,G1,G2
-
 
 
 class BNN(nn.Module):
@@ -100,7 +102,7 @@ class BPINN:
 
 
 class HMC:
-    def __init__(self, target_log_prob_fn, init_state, step_size=0.0001, num_leapfrog_steps=30, num_results=800, num_burnin=800):
+    def __init__(self, target_log_prob_fn, init_state, step_size=0.0001, num_leapfrog_steps=10, num_results=800, num_burnin=800):
         self.target_log_prob_fn = target_log_prob_fn
         self.current_state = init_state.clone().detach().requires_grad_(True)
         self.step_size = step_size
@@ -152,7 +154,6 @@ class HMC:
             delta_H = current_hamiltonian - proposed_hamiltonian
             acceptance_prob = torch.exp(delta_H).clamp(max=1.0)
 
-            print(f"迭代 {i+1}: w_real={current_position[-4]:.4f}, w_imag={current_position[-3]:.4f}")
 
             if torch.rand(1) < acceptance_prob:
                 current_position = proposed_position.clone().detach().requires_grad_(True)
@@ -163,6 +164,9 @@ class HMC:
 
             if i >= self.num_burnin:
                 samples.append(current_position.detach().numpy())
+
+            if i % 10 == 0:
+                print(f"迭代 {i}: w_real={current_position[-4]:.4f}, w_imag={current_position[-3]:.4f}")
 
             Leaver_real = 0.85023
             Leaver_img = -0.14365
@@ -197,15 +201,19 @@ w_real = dist.Normal(0.7,1.0).sample()
 w_imag = dist.Normal(-0.1,1.0).sample()
 A_real = dist.Normal(l*(l+1)-s*(s+1),1).sample()
 A_imag = dist.Normal(0.0,1.0).sample()
-init_vec = torch.cat([torch.normal(mean=0.0, std=0.05, size=(bpinn.n_f + bpinn.n_g,)), torch.tensor([w_real, w_imag, A_real, A_imag])])
+
+vec_params = torch.load("pinn_params.pt")
+init_vec = torch.cat([vec_params, torch.tensor([w_real, w_imag, A_real, A_imag])])
 init_vec = init_vec.clone().detach().requires_grad_(True)
 
 def log_post(vec):
     noise_pdef = 0.05
     noise_pdeg = 0.05
+    '''
     noise_w = 0.05
     noise_A = 0.05
     prior_sigma = 1.0
+    '''
 
     f, g, w, A = bpinn.forward_from_vector(vec, x, u)
     F0,F1,F2 = F_terms(a,w,A,s,m,x)
@@ -222,17 +230,19 @@ def log_post(vec):
     lik_F = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum() + dist.Normal(0., noise_pdef).log_prob(res_F.imag).sum()
     lik_G = dist.Normal(0., noise_pdeg).log_prob(res_G.real).sum() + dist.Normal(0., noise_pdeg).log_prob(res_G.imag).sum()
     
+    '''
     log_prior = dist.Normal(0, prior_sigma).log_prob(vec[:-4]).sum()
     log_prior += dist.Normal(0, noise_w).log_prob(vec[-4]).sum()
     log_prior += dist.Normal(0, noise_w).log_prob(vec[-3]).sum()
     log_prior += dist.Normal(0, noise_A).log_prob(vec[-2]).sum()
     log_prior += dist.Normal(0, noise_A).log_prob(vec[-1]).sum()
+    '''
 
-    return lik_F + lik_G + log_prior
+    return lik_F + lik_G 
 
 hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
 samples, acceptance_rate = hmc.run_chain()
-print("形状:", samples.shape)
+print("形状:", samples.shape, "接受率:", acceptance_rate)
 
 w_realsum = 0
 w_imagsum = 0
@@ -254,3 +264,4 @@ def print_results_extra(w_real,w_img):
     print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img:.5f}, Error real: {error_real:.5f}%, Error imaginary: {error_img:.5f}%, Average error: {average_error:.5f}%")
 
 print_results_extra(w_real,w_imag)
+

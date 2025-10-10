@@ -137,7 +137,7 @@ class NeuralNetwork(nn.Module):
         self.A_img = torch.nn.Parameter(data = torch.tensor(0.0), requires_grad = True)
 
         self.w_real = torch.nn.Parameter(data = torch.tensor(0.7), requires_grad = True)
-        self.w_img = torch.nn.Parameter(data = torch.tensor(-1.4), requires_grad = True)
+        self.w_img = torch.nn.Parameter(data = torch.tensor(-0.1), requires_grad = True)
 
 
         #Network for the Radial Equation (depends on x)
@@ -372,6 +372,7 @@ for a in a_k_list:
         if(((i+1)%10 == 0) or (i == 0) ):
             
             print(f"LFBGS: a = {a}, loss at iteration {i+1} = {closure().item():.5f}")
+
             """
             # If the two last values of the loss are the same, within a tolerance of 1e-5, we stop the training:
             if i > 0 and abs(loss_list[-1] - loss_list[-10]) < 1e-5:
@@ -419,6 +420,5 @@ def print_results_extra(w_real_list,w_img_list):
         average_error = (np.abs(error_real[i]) + np.abs(error_img[i]))/2
         print(f"Real part of w: {w_real_list[i]:.5f}, Imaginary part of w: {w_img_list[i]:.5f}, Error real: {error_real[i]:.5f}%, Error imaginary: {error_img[i]:.5f}%, Average error: {average_error:.5f}%")
 print_results_extra(np.array(w_real_list_LBFGS),np.array(w_img_list_LBFGS))
-
 
 

@@ -207,6 +207,29 @@ class NeuralNetwork(nn.Module):
     
         
         return f_new, g_new
+    
+    def get_parameters_vector(self):
+        """
+        Returns a flattened vector containing all weights and biases
+        from both the x_network and u_network.
+        The order is: x_network [W1, b1, W2, b2, ...], then u_network [W1, b1, W2, b2, ...].
+        """
+        params = []
+
+        # Collect parameters from x_network
+        for layer in self.x_network:
+            if isinstance(layer, nn.Linear):
+                params.append(layer.weight.flatten())
+                params.append(layer.bias.flatten())
+
+        # Collect parameters from u_network
+        for layer in self.u_network:
+            if isinstance(layer, nn.Linear):
+                params.append(layer.weight.flatten())
+                params.append(layer.bias.flatten())
+
+        # Concatenate into a single vector
+        return torch.cat(params)
 
 
 class CustomLoss(nn.Module):
@@ -379,7 +402,8 @@ for a in a_k_list:
                 break
             
             """
-    
+    vec_params = model.get_parameters_vector().clone().detach()
+    torch.save(vec_params, "pinn_params.pt")
 
     
     #Plot of the losses for each interesting a:
@@ -420,6 +444,5 @@ def print_results_extra(w_real_list,w_img_list):
         average_error = (np.abs(error_real[i]) + np.abs(error_img[i]))/2
         print(f"Real part of w: {w_real_list[i]:.5f}, Imaginary part of w: {w_img_list[i]:.5f}, Error real: {error_real[i]:.5f}%, Error imaginary: {error_img[i]:.5f}%, Average error: {average_error:.5f}%")
 print_results_extra(np.array(w_real_list_LBFGS),np.array(w_img_list_LBFGS))
-
 
 
