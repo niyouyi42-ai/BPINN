@@ -228,9 +228,9 @@ class NeuralNetwork(nn.Module):
                 params.append(layer.weight.flatten())
                 params.append(layer.bias.flatten())
 
+        params.append(torch.tensor([self.w_real, self.w_img, self.A_real, self.A_img]))
         # Concatenate into a single vector
         return torch.cat(params)
-
 
 class CustomLoss(nn.Module):
     """
@@ -386,7 +386,7 @@ for a in a_k_list:
         return loss
     
     #Train the model with the fine tuning optimiser
-    for i in range(250): 
+    for i in range(300): 
         optimiser_tuning.step(closure)
 
         #record values of loss function

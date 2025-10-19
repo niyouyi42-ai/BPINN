@@ -102,7 +102,7 @@ class BPINN:
 
 
 class HMC:
-    def __init__(self, target_log_prob_fn, init_state, step_size=0.0001, num_leapfrog_steps=10, num_results=800, num_burnin=800):
+    def __init__(self, target_log_prob_fn, init_state, step_size=0.0001, num_leapfrog_steps=10, num_results=1500, num_burnin=1500):
         self.target_log_prob_fn = target_log_prob_fn
         self.current_state = init_state.clone().detach().requires_grad_(True)
         self.step_size = step_size
@@ -197,13 +197,9 @@ r_plus = (1 + torch.sqrt(1-4*a**2)) / 2
 x = torch.linspace(0,1/r_plus,N_x).view(-1,1).requires_grad_(True)
 u = torch.linspace(-1,1,N_u).view(-1,1).requires_grad_(True)
 
-w_real = dist.Normal(0.7,1.0).sample()
-w_imag = dist.Normal(-0.1,1.0).sample()
-A_real = dist.Normal(l*(l+1)-s*(s+1),1).sample()
-A_imag = dist.Normal(0.0,1.0).sample()
 
 vec_params = torch.load("pinn_params.pt")
-init_vec = torch.cat([vec_params, torch.tensor([w_real, w_imag, A_real, A_imag])])
+init_vec = vec_params
 init_vec = init_vec.clone().detach().requires_grad_(True)
 
 def log_post(vec):
@@ -249,8 +245,8 @@ w_imagsum = 0
 for i in samples:
     w_realsum += i[-4]
     w_imagsum += i[-3]
-w_real = w_realsum/800
-w_imag = w_imagsum/800
+w_real = w_realsum/1500
+w_imag = w_imagsum/1500
 
 def print_results_extra(w_real,w_img):
     Leaver_real = 0.85023
@@ -265,3 +261,77 @@ def print_results_extra(w_real,w_img):
 
 print_results_extra(w_real,w_imag)
 
+
+
+
+
+vec_last = torch.tensor(samples[-1], dtype=torch.float32, requires_grad=True)
+
+# 使用相同的 forward 流程计算 f, g, 残差
+f, g, w, A = bpinn.forward_from_vector(vec_last, x, u)
+F0, F1, F2 = F_terms(a, w, A, s, m, x)
+G0, G1, G2 = G_terms(a, w, A, s, m, u)
+
+dfdt = gradients(f, x)
+d2fdt2 = gradients(dfdt, x)
+dgdt = gradients(g, u)
+d2gdt2 = gradients(dgdt, u)
+
+res_F = F2 * d2fdt2 + F1 * dfdt + F0 * f
+res_G = G2 * d2gdt2 + G1 * dgdt + G0 * g
+
+# 计算误差指标：L2范数与平均绝对误差
+error_F = torch.mean(torch.abs(res_F))
+error_G = torch.mean(torch.abs(res_G))
+
+print(f"第3000次迭代的误差结果:")
+print(f"  PDE F 方程平均绝对误差: {error_F.item():.4e}")
+print(f"  PDE G 方程平均绝对误差: {error_G.item():.4e}")
+
+
+
+
+
+
+# 提取w实部和虚部的采样序列
+w_real_series = [s[-4] for s in samples]
+w_imag_series = [s[-3] for s in samples]
+iterations = np.arange(len(samples))
+
+
+
+
+# -------- 图1：随迭代次数变化 --------
+plt.figure(figsize=(10,5))
+plt.subplot(2,1,1)
+plt.plot(iterations, w_real_series, label='Re(w)')
+plt.ylabel('w_real')
+plt.legend()
+plt.subplot(2,1,2)
+plt.plot(iterations, w_imag_series, color='orange', label='Im(w)')
+plt.xlabel('Iteration')
+plt.ylabel('w_imag')
+plt.legend()
+plt.suptitle('Evolution of w_real and w_imag over HMC iterations')
+plt.tight_layout(rect=[0,0,1,0.96])
+plt.show()
+
+
+Leaver_real = 0.85023
+Leaver_imag = -0.14365
+# -------- 图2：分布条形图（直方图形式）--------
+plt.figure(figsize=(10,5))
+plt.subplot(1,2,1)
+plt.hist(w_real_series, bins=30, color='steelblue', edgecolor='black')
+plt.axvline(x=Leaver_real, color='red', linestyle='--', linewidth=1.5, label='True Re(w)')
+plt.xlabel('w_real')
+plt.ylabel('Count')
+plt.title('Distribution of Re(w)')
+plt.subplot(1,2,2)
+plt.hist(w_imag_series, bins=30, color='orange', edgecolor='black')
+plt.axvline(x=Leaver_imag, color='red', linestyle='--', linewidth=1.5, label='True Im(w)')
+plt.xlabel('w_imag')
+plt.ylabel('Count')
+plt.title('Distribution of Im(w)')
+plt.tight_layout()
+plt.show()
