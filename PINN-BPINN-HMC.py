@@ -298,6 +298,13 @@ w_real_series = [s[-4] for s in samples]
 w_imag_series = [s[-3] for s in samples]
 iterations = np.arange(len(samples))
 
+w_realtensor = torch.tensor(w_real_series)
+w_imagtensor = torch.tensor(w_imag_series)
+w_realmean = torch.mean(w_realtensor)
+w_imagmean = torch.mean(w_imagtensor)
+w_realsigma = torch.std(w_realtensor)
+w_imagsigma = torch.std(w_imagtensor)
+
 
 
 
@@ -324,12 +331,18 @@ plt.figure(figsize=(10,5))
 plt.subplot(1,2,1)
 plt.hist(w_real_series, bins=30, color='steelblue', edgecolor='black')
 plt.axvline(x=Leaver_real, color='red', linestyle='--', linewidth=1.5, label='True Re(w)')
+plt.axvline(x=w_realmean, color='blue', linestyle='--', linewidth=1.5, label='mean Re(w)')
+plt.axvline(x=w_realmean-w_realsigma, color='blue', linestyle='--', linewidth=1.5, label='1sigma Re(w)')
+plt.axvline(x=w_realmean+w_realsigma, color='blue', linestyle='--', linewidth=1.5, label='1sigma Re(w)')
 plt.xlabel('w_real')
 plt.ylabel('Count')
 plt.title('Distribution of Re(w)')
 plt.subplot(1,2,2)
 plt.hist(w_imag_series, bins=30, color='orange', edgecolor='black')
 plt.axvline(x=Leaver_imag, color='red', linestyle='--', linewidth=1.5, label='True Im(w)')
+plt.axvline(x=w_imagmean, color='blue', linestyle='--', linewidth=1.5, label='mean Im(w)')
+plt.axvline(x=w_imagmean-w_imagsigma, color='blue', linestyle='--', linewidth=1.5, label='1sigma Im(w)')
+plt.axvline(x=w_imagmean+w_imagsigma, color='blue', linestyle='--', linewidth=1.5, label='1sigma Im(w)')
 plt.xlabel('w_imag')
 plt.ylabel('Count')
 plt.title('Distribution of Im(w)')
