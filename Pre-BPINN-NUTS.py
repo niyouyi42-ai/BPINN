@@ -205,9 +205,7 @@ class NUTS:
                 accept_sum += accept_prob
                 total_count += 1
 
-            if m % 1 == 0:
-                print(f"Iter {m}, step_size={step_size:.5f}, accept={accept_prob:.3f}")
-
+            if m % 10 == 0:
                 f, g, w, A = bpinn.forward_from_vector(current_theta, x, u)
                 F0, F1, F2 = F_terms(a, w, A, bpinn.s, bpinn.m, x)
                 G0, G1, G2 = G_terms(a, w, A, bpinn.s, bpinn.m, u)
