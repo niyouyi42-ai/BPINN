@@ -225,7 +225,7 @@ class NUTS:
             r_minus, r_plus = r0.clone(), r0.clone()
             theta_prime = theta0.clone()
             n, s, j = 1, 1, 0
-
+            alpha_sum, n_alpha_sum = 0.0, 0.0
 
             while s == 1 and j < self.max_tree_depth:
                 v = 1 if torch.rand(()) < 0.5 else -1
@@ -243,22 +243,23 @@ class NUTS:
                 s1 = torch.dot((theta_plus - theta_minus), r_minus) 
                 s2 = torch.dot((theta_plus - theta_minus), r_plus) 
                 s = s_prime * (s1 >= 0) * (s2 >= 0)
-
+                alpha_sum += alpha
+                n_alpha_sum += n_alpha
                 j += 1
 
-            if m > self.adapt_steps:
-                samples.append(theta_prime.detach().numpy())
-                total_steps += 1
+            accept_prob = alpha_sum / max(n_alpha_sum, 1)
+            if torch.rand(()) < accept_prob:
+                theta0= theta_prime.clone()
 
             if m <= self.adapt_steps:
-                accept_prob = alpha / n_alpha 
-
                 H_bar = (1 - 1/(m + t0)) * H_bar + (1/(m + t0)) * (self.target_accept - accept_prob)
                 log_step = torch.tensor(mu - (np.sqrt(m)/gamma) * H_bar)
                 log_step_bar = (m ** (-kappa)) * log_step + (1 - m ** (-kappa)) * torch.log(step_size_bar)
                 step_size_bar = torch.exp(log_step_bar)
             else:
                 step_sizes[m] = step_size_bar
+                samples.append(theta_prime.detach().numpy())
+                total_steps += 1
 
 
 
@@ -314,114 +315,3 @@ def log_post(vec):
 nuts = NUTS(target_log_prob_fn=log_post, init_state=init_vec)
 samples, acceptance_rate = nuts.run_chain()
 print("形状:", samples.shape, "接受率:", acceptance_rate)
-
-
-
-
-w_realsum = 0
-w_imagsum = 0
-for i in samples:
-    w_realsum += i[-4]
-    w_imagsum += i[-3]
-w_real = w_realsum/1500
-w_imag = w_imagsum/1500
-
-def print_results_extra(w_real,w_img):
-    Leaver_real = 0.85023
-    Leaver_img = -0.14365
-
-    error_real = np.abs(100*(w_real - Leaver_real)/Leaver_real)
-
-    error_img = np.abs(100*(w_img - Leaver_img)/Leaver_img)
-
-    average_error = (np.abs(error_real) + np.abs(error_img))/2
-    print(f"Real part of w: {w_real:.5f}, Imaginary part of w: {w_img:.5f}, Error real: {error_real:.5f}%, Error imaginary: {error_img:.5f}%, Average error: {average_error:.5f}%")
-
-print_results_extra(w_real,w_imag)
-
-
-
-
-
-vec_last = torch.tensor(samples[-1], dtype=torch.float32, requires_grad=True)
-
-
-f, g, w, A = bpinn.forward_from_vector(vec_last, x, u)
-F0, F1, F2 = F_terms(a, w, A, s, m, x)
-G0, G1, G2 = G_terms(a, w, A, s, m, u)
-
-dfdt = gradients(f, x)
-d2fdt2 = gradients(dfdt, x)
-dgdt = gradients(g, u)
-d2gdt2 = gradients(dgdt, u)
-
-res_F = F2 * d2fdt2 + F1 * dfdt + F0 * f
-res_G = G2 * d2gdt2 + G1 * dgdt + G0 * g
-
-
-error_F = torch.mean(torch.abs(res_F))
-error_G = torch.mean(torch.abs(res_G))
-
-print(f"第3000次迭代的误差结果:")
-print(f"  PDE F 方程平均绝对误差: {error_F.item():.4e}")
-print(f"  PDE G 方程平均绝对误差: {error_G.item():.4e}")
-
-
-
-
-
-
-w_real_series = [s[-4] for s in samples]
-w_imag_series = [s[-3] for s in samples]
-iterations = np.arange(len(samples))
-
-w_realtensor = torch.tensor(w_real_series)
-w_imagtensor = torch.tensor(w_imag_series)
-w_realmean = torch.mean(w_realtensor)
-w_imagmean = torch.mean(w_imagtensor)
-w_realsigma = torch.std(w_realtensor)
-w_imagsigma = torch.std(w_imagtensor)
-
-
-
-
-# -------- 图1：随迭代次数变化 --------
-plt.figure(figsize=(10,5))
-plt.subplot(2,1,1)
-plt.plot(iterations, w_real_series, label='Re(w)')
-plt.ylabel('w_real')
-plt.legend()
-plt.subplot(2,1,2)
-plt.plot(iterations, w_imag_series, color='orange', label='Im(w)')
-plt.xlabel('Iteration')
-plt.ylabel('w_imag')
-plt.legend()
-plt.suptitle('Evolution of w_real and w_imag over HMC iterations')
-plt.tight_layout(rect=[0,0,1,0.96])
-plt.show()
-
-
-Leaver_real = 0.85023
-Leaver_imag = -0.14365
-# -------- 图2：分布条形图（直方图形式）--------
-plt.figure(figsize=(10,5))
-plt.subplot(1,2,1)
-plt.hist(w_real_series, bins=30, color='steelblue', edgecolor='black')
-plt.axvline(x=Leaver_real, color='red', linestyle='--', linewidth=1.5, label='True Re(w)')
-plt.axvline(x=w_realmean.cpu(), color='blue', linestyle='--', linewidth=1.5, label='mean Re(w)')
-plt.axvline(x=(w_realmean-w_realsigma).cpu(), color='blue', linestyle='--', linewidth=1.5, label='1sigma Re(w)')
-plt.axvline(x=(w_realmean+w_realsigma).cpu(), color='blue', linestyle='--', linewidth=1.5, label='1sigma Re(w)')
-plt.xlabel('w_real')
-plt.ylabel('Count')
-plt.title('Distribution of Re(w)')
-plt.subplot(1,2,2)
-plt.hist(w_imag_series, bins=30, color='orange', edgecolor='black')
-plt.axvline(x=Leaver_imag, color='red', linestyle='--', linewidth=1.5, label='True Im(w)')
-plt.axvline(x=w_imagmean.cpu(), color='blue', linestyle='--', linewidth=1.5, label='mean Im(w)')
-plt.axvline(x=(w_imagmean-w_imagsigma).cpu(), color='blue', linestyle='--', linewidth=1.5, label='1sigma Im(w)')
-plt.axvline(x=(w_imagmean+w_imagsigma).cpu(), color='blue', linestyle='--', linewidth=1.5, label='1sigma Im(w)')
-plt.xlabel('w_imag')
-plt.ylabel('Count')
-plt.title('Distribution of Im(w)')
-plt.tight_layout()
-plt.show()

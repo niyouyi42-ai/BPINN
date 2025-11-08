@@ -165,8 +165,7 @@ class HMC:
             if i >= self.num_burnin:
                 samples.append(current_position.detach().numpy())
 
-            #if i % 10 == 0:
-            #    print(f"迭代 {i}: w_real={current_position[-4]:.4f}, w_imag={current_position[-3]:.4f}")
+
 
             Leaver_real = 0.85023
             Leaver_img = -0.14365
@@ -208,12 +207,7 @@ init_vec = init_vec.clone().detach().requires_grad_(True)
 def log_post(vec):
     noise_pdef = 0.05
     noise_pdeg = 0.05
-    '''
-    noise_w = 0.05
-    noise_A = 0.05
-    prior_sigma = 1.0
-    '''
-
+  
     f, g, w, A = bpinn.forward_from_vector(vec, x, u)
     F0,F1,F2 = F_terms(a,w,A,s,m,x)
     G0,G1,G2 = G_terms(a,w,A,s,m,u)
@@ -229,14 +223,6 @@ def log_post(vec):
     lik_F = dist.Normal(0., noise_pdef).log_prob(res_F.real).sum() + dist.Normal(0., noise_pdef).log_prob(res_F.imag).sum()
     lik_G = dist.Normal(0., noise_pdeg).log_prob(res_G.real).sum() + dist.Normal(0., noise_pdeg).log_prob(res_G.imag).sum()
     
-    '''
-    log_prior = dist.Normal(0, prior_sigma).log_prob(vec[:-4]).sum()
-    log_prior += dist.Normal(0, noise_w).log_prob(vec[-4]).sum()
-    log_prior += dist.Normal(0, noise_w).log_prob(vec[-3]).sum()
-    log_prior += dist.Normal(0, noise_A).log_prob(vec[-2]).sum()
-    log_prior += dist.Normal(0, noise_A).log_prob(vec[-1]).sum()
-    '''
-
     return lik_F + lik_G 
 
 hmc = HMC(target_log_prob_fn=log_post, init_state=init_vec)
@@ -270,7 +256,7 @@ print_results_extra(w_real,w_imag)
 
 vec_last = torch.tensor(samples[-1], dtype=torch.float32, requires_grad=True)
 
-# 使用相同的 forward 流程计算 f, g, 残差
+
 f, g, w, A = bpinn.forward_from_vector(vec_last, x, u)
 F0, F1, F2 = F_terms(a, w, A, s, m, x)
 G0, G1, G2 = G_terms(a, w, A, s, m, u)
@@ -283,7 +269,6 @@ d2gdt2 = gradients(dgdt, u)
 res_F = F2 * d2fdt2 + F1 * dfdt + F0 * f
 res_G = G2 * d2gdt2 + G1 * dgdt + G0 * g
 
-# 计算误差指标：L2范数与平均绝对误差
 error_F = torch.mean(torch.abs(res_F))
 error_G = torch.mean(torch.abs(res_G))
 
@@ -296,10 +281,10 @@ print(f"  PDE G 方程平均绝对误差: {error_G.item():.4e}")
 
 
 
-# 提取w实部和虚部的采样序列
 w_real_series = [s[-4] for s in samples]
 w_imag_series = [s[-3] for s in samples]
 iterations = np.arange(len(samples))
+
 
 w_realtensor = torch.tensor(w_real_series)
 w_imagtensor = torch.tensor(w_imag_series)
@@ -311,7 +296,9 @@ w_imagsigma = torch.std(w_imagtensor)
 
 
 
-# -------- 图1：随迭代次数变化 --------
+
+
+
 plt.figure(figsize=(10,5))
 plt.subplot(2,1,1)
 plt.plot(iterations, w_real_series, label='Re(w)')
@@ -329,7 +316,10 @@ plt.show()
 
 Leaver_real = 0.85023
 Leaver_imag = -0.14365
-# -------- 图2：分布条形图（直方图形式）--------
+
+
+
+
 plt.figure(figsize=(10,5))
 plt.subplot(1,2,1)
 plt.hist(w_real_series, bins=30, color='steelblue', edgecolor='black')
@@ -350,4 +340,49 @@ plt.xlabel('w_imag')
 plt.ylabel('Count')
 plt.title('Distribution of Im(w)')
 plt.tight_layout()
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+plt.figure(figsize=(6,6))
+plt.scatter(w_real_series, w_imag_series, alpha=0.5, color='purple')
+plt.axvline(x=Leaver_real, color='red', linestyle='--', linewidth=1.5, label='True Re(w)')
+plt.axhline(y=Leaver_imag, color='red', linestyle='--', linewidth=1.5, label='True Im(w)')
+plt.xlabel('Re(w)')
+plt.ylabel('Im(w)')
+plt.title('Joint Distribution of w_real and w_imag')
+plt.legend()
+plt.tight_layout()
+plt.savefig('HMC_joint_distribution.png', dpi=300)
+plt.show()
+
+
+
+
+
+
+plt.figure(figsize=(7,6))
+plt.plot(w_real_series, w_imag_series, color='teal', alpha=0.7, linewidth=1)
+plt.scatter(w_real_series[0], w_imag_series[0], color='orange', label='Start')
+plt.scatter(w_real_series[-1], w_imag_series[-1], color='red', label='End')
+plt.scatter(Leaver_real,Leaver_imag, color='blue', label='True Value')
+plt.xlabel('Re(w)')
+plt.ylabel('Im(w)')
+plt.title('HMC Sampling Trajectory in Parameter Space')
+plt.legend()
+plt.tight_layout()
+plt.savefig('HMC_sampling_trajectory.png', dpi=300)
 plt.show()
